@@ -27,6 +27,7 @@ CONFIG += c++11
 SOURCES += \
         main.cpp \
         mainwindow.cpp \
+        songData.cpp \
         songview.cpp
 
 HEADERS += \

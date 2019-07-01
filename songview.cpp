@@ -1,6 +1,28 @@
 #include "songview.h"
 #include <QLabel>
 
+class StuffViewVisitor : public Visitor
+{
+public:
+    StuffViewVisitor(SongData::ClefType clefType, QWidget& baseWidget);
+
+    void addClef();
+
+    virtual void visitChord(const SongData::Chord& chord) override;
+    virtual void visitBarLine(const SongData::BarLine& line) override;
+    virtual void visitBarSize(const SongData::BarSize& size) override;
+
+private:
+    SongData::ClefType clefType;
+    QWidget&           baseWidget;
+
+    // Base Geometry
+          int32_t left   = 20;
+    const int32_t top    = 20;
+    const int32_t width  = 20;
+    const int32_t height = 50;
+};
+
 const QString style = "font-family:Bravura; font-size:14pt;";
 
 constexpr int32_t pixBetweenLines = 4;
@@ -47,27 +69,27 @@ static int32_t getGClefHeightOffsetAndAlteration(uint8_t note, Alteration& alter
 
     switch(halfToneDelta)
     {
+    case -2: // F
+        alter = Alteration::None;
+        return 1 * subLineSize;
     case -1: // #F
         alter = Alteration::Sharp;
         return 1 * subLineSize;
-    case 0:
+    case 0:  // G
         alter = Alteration::None;
         return 0;
-    case 1:
+    case 1: // #G
         alter = Alteration::Sharp;
         return 0;
-    case 2:
+    case 2: // A
         alter = Alteration::None;
         return -1 * subLineSize;
 
     default:
         Q_ASSERT(false); // Not implemented;
-        break;
+        return 0;
     }
 }
-
-// BaseGeometry:
-// 20 20 300 50
 
 static void createLabel(QChar text, int32_t left, int32_t top, int32_t width, int32_t height, QWidget& baseWidget)
 {
@@ -79,83 +101,90 @@ static void createLabel(QChar text, int32_t left, int32_t top, int32_t width, in
 
 void bildSongView(SongData::Party& party, QWidget& baseWidget)
 {
-    // Base Geometry
-          int32_t left = 20;
-    const int32_t top = 20;
-    const int32_t width = 20;
-    const int32_t height = 50;
+    StuffViewVisitor stuffViewVisitor(party.clefType, baseWidget);
 
-    createLabel(QChar(ClefCodes[static_cast<int32_t>(party.clefType)]), left, top + ClefOffset[static_cast<int32_t>(party.clefType)], width, height, baseWidget);
-    left += width;
+    stuffViewVisitor.addClef();
 
     for(auto& element : party.elements)
+        element->acceptVisitor(stuffViewVisitor);
+}
+
+StuffViewVisitor::StuffViewVisitor(SongData::ClefType clefType, QWidget& baseWidget)
+ : clefType(clefType)
+ , baseWidget(baseWidget)
+{
+}
+
+void StuffViewVisitor::addClef()
+{
+    createLabel(QChar(ClefCodes[static_cast<int32_t>(clefType)]), left, top + ClefOffset[static_cast<int32_t>(clefType)], width, height, baseWidget);
+    left += width;
+}
+
+void StuffViewVisitor::visitChord(const SongData::Chord& chord)
+{
+    Q_ASSERT(chord.getDuration().denominator <= 8);
+    const char32_t durationUTFCode = noteDurationMap[chord.getDuration().denominator];
+    Q_ASSERT(durationUTFCode != 0);
+    const QChar durationCode(durationUTFCode);
+
+    const int32_t noteToClefOffset = ClefOffset[static_cast<int32_t>(clefType)];
+
+    if(clefType == SongData::ClefType::GClef)
     {
-        // I know dynamic_cast is not best solution
-        if(SongData::BarSize* barSize = dynamic_cast<SongData::BarSize*>(element))
+        for(size_t id=0; id<chord.getNoteAmount(); ++id)
         {
-            QChar nominatorCode(ZeroCharacterCode + barSize->nominator);
-            QChar denominatorCode(ZeroCharacterCode + barSize->denominator);
+            Alteration alter;
+            const int32_t toneOffset = getGClefHeightOffsetAndAlteration(chord.getNote(id), alter);
 
-            createLabel(nominatorCode,   left, top-2, width, height, baseWidget);
-            createLabel(denominatorCode, left, top+8, width, height, baseWidget);
-            left += width;
-        }
-        else if(SongData::Chord* chord = dynamic_cast<SongData::Chord*>(element))
-        {
-            Q_ASSERT(chord->duration.denominator <= 8);
-            const char32_t durationUTFCode = noteDurationMap[chord->duration.denominator];
-            Q_ASSERT(durationUTFCode != 0);
-            const QChar durationCode(durationUTFCode);
-
-            const int32_t noteToClefOffset = ClefOffset[static_cast<int32_t>(party.clefType)];
-
-            // Note: Only one note per 'chord' is implemented
-
-            if(party.clefType == SongData::ClefType::GClef)
+            if(alter == Alteration::Sharp)
             {
-                Alteration alter;
-                const int32_t toneOffset = getGClefHeightOffsetAndAlteration(chord->notes[0], alter);
-
-                if(alter == Alteration::Sharp)
-                {
-                    createLabel(QChar(sharpCode), left, top + noteToClefOffset + toneOffset, width, height, baseWidget);
-                    left += 6;
-                }
-                else if(alter != Alteration::None)
-                {
-                    Q_ASSERT(false);
-                }
-
-                createLabel(durationCode, left, top + noteToClefOffset + toneOffset, width, height, baseWidget);
+                createLabel(QChar(sharpCode), left, top + noteToClefOffset + toneOffset, width, height, baseWidget);
+                left += 6;
             }
-            else
+            else if(alter != Alteration::None)
             {
                 Q_ASSERT(false);
             }
 
-            int32_t flagTop = top + 20;
-            for(auto& flag : chord->flags)
-            {
-                const char32_t flagUTFCode = flagsCodes[uint32_t(flag)];
-                Q_ASSERT(flagUTFCode != 0);
-                const QChar flagCode(flagUTFCode);
-
-                createLabel(flagCode, left, flagTop, width, height, baseWidget);
-                flagTop += 8;
-            }
-
-            left += width;
-        }
-        else if(SongData::BarLine* line = dynamic_cast<SongData::BarLine*>(element))
-        {
-            // Not implemented cases:
-            Q_ASSERT(line->repeatOpen == false);
-            Q_ASSERT(line->repeatClose == false);
-
-            if(line->endOfParty)
-            {
-                createLabel(QChar(BarLineEnd), left, top+13, width, height, baseWidget);
-            }
+            createLabel(durationCode, left, top + noteToClefOffset + toneOffset, width, height, baseWidget);
         }
     }
+    else
+    {
+        Q_ASSERT(false);
+    }
+
+    int32_t flagTop = top + 20;
+    for(auto& flag : chord.getFlags())
+    {
+        const char32_t flagUTFCode = flagsCodes[uint32_t(flag)];
+        Q_ASSERT(flagUTFCode != 0);
+        const QChar flagCode(flagUTFCode);
+
+        createLabel(flagCode, left, flagTop, width, height, baseWidget);
+        flagTop += 8;
+    }
+
+    left += width;
+}
+
+void StuffViewVisitor::visitBarLine(const SongData::BarLine& line)
+{
+    // Not implemented cases:
+    Q_ASSERT(line.isRepeatOpen() == false);
+    Q_ASSERT(line.isRepeatClose() == false);
+
+    if(line.isEndOfParty())
+        createLabel(QChar(BarLineEnd), left, top+13, width, height, baseWidget);
+}
+
+void StuffViewVisitor::visitBarSize(const SongData::BarSize& barSize)
+{
+    QChar nominatorCode(ZeroCharacterCode + barSize.getNominator());
+    QChar denominatorCode(ZeroCharacterCode + barSize.getDenominator());
+
+    createLabel(nominatorCode,   left, top-2, width, height, baseWidget);
+    createLabel(denominatorCode, left, top+8, width, height, baseWidget);
+    left += width;
 }
